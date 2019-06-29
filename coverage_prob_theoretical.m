@@ -1,4 +1,4 @@
-clear;
+clear all;
 
 % % ============ SPATIAL MODEL ========= %
 lambda_l = 10/pi; % (LINE_DENSITY/PI); Line density - km^-1
@@ -30,7 +30,7 @@ qc = .05; % Probability with which the mainlobe of interfering TIER 1 node is di
 alpha = 4; % PATH_LOSS EXPONENT
 
 % ~~~ NAKAGAMI-M FADING PARAMETERS ~~~ %
-m1 = 2; % Tier 1
+m1 = 1; % Tier 1
 m20 = 2; % Tier 2 typical line
 m21 = 1; % Tier 2 other lines
 % m = 1;
@@ -50,8 +50,7 @@ ln_sig21 = 4;% Std deviation  of log-normal shadowing gain in dB for TIER 2 OTHE
 sir_threshold_dB = 0;%-50:5:50;
 sir_threshold = 10.^(.1*sir_threshold_dB);
 
-%b = sir_threshold;
-
+%---------------END of PARAMETERS ------------------------------------------------------
 sf_u0 = exp( 1/alpha*log(10)/10*ln_mu20 + (1/alpha*log(10)/10)^2*ln_sig20^2/2);
 sf_a = exp( 2/alpha*log(10)/10*ln_mu21 + (2/alpha*log(10)/10)^2*ln_sig21^2/2 );
 sf_c = exp( 2/alpha*log(10)/10*ln_mu1 + (2/alpha*log(10)/10)^2*ln_sig1^2/2 );
@@ -93,84 +92,84 @@ pc_e1 = @(b) 0;
 f1 = @(s,x) -2*sh_lambda_2*(1 - (1+ s*(p2)*mlg_2*x.^(-alpha)/m20).^(-m20));
 f2 = @(s,x) -2*pi*sh_lambda_a*(1 - (1+s*(p2)*slg_2*x.^(-alpha)/m21).^(-m21)).*x;
 f3 = @(s,x) -2*pi*qc*sh_lambda_1*(1 - (1+s*(p1*mlg_1).*x.^(-alpha)/m1).^(-m1)).*x -2*pi*(1-qc)*sh_lambda_1*(1 - (1+s*(p1*slg_1)*x.^(-alpha)/m1).^(-m1)).*x;
-syms s r x;
-g1 = int( f1(s,x),x,r/zeta21,Inf);
-g2 = int( f2(s,x),x,0, Inf);
-g3 = int( f3(s,x),x,r,Inf);
-fg = g1+g2+g3;
-fg_str = char(fg); % To CONVERT SYM EXPR TO FUNC HANDLE
-fg_str = strrep(fg_str, 'int(', 'integral(@(x)'); 
-fg_str = strrep(fg_str, 'x,','');
-fg_str = strrep(fg_str, '*', '.*');
-fg_str = strrep(fg_str, '/', './');
-fg_str = strrep(fg_str, '^', '.^');
-fg_mf = eval(['@(r,s) ' fg_str]); % CONVERTED SYM EXPR TO FUNC HANDLE
-for n=0:m1-1
-    derk1_I_e1 = @(r,s) 0;
-    for k=0:n
-        for j=0:k
-            a1_str = char( diff( (fg)^(k-j), 's', n));
-            a1_str = strrep(a1_str, 'int(', 'integral(@(x)');
-            a1_str = strrep(a1_str, 'x,','');
-            a1_str = strrep(a1_str, '*','.*');
-            a1_str = strrep(a1_str, '/','./');
-            a1_str = strrep(a1_str, '^','.^');
-            a1_mf = eval(['@(r,s) ' a1_str]);
-            derk1_I_e1 = @(r,s) derk1_I_e1(r,s) + (-1)^j/factorial(k)*nchoosek(k,j)*a1_mf(r,s).*(fg_mf(r,s)).^j;
+fg_mf = @(r,s) integral(@(x) f1(s,x), r/zeta21, Inf,'ArrayValued', true) + integral(@(x) f2(s,x),0, Inf,'ArrayValued', true) + integral(@(x) f3(s,x),r,Inf,'ArrayValued', true);
+
+if m1==1
+    pc_e1 = @(b) (integral(@(r) lapI_g_c(m1*b*r.^(alpha)/(p1*mlg_1),r).*pdfr_g_c(r), 0, Inf, 'ArrayValued', true));
+else
+    syms s r x;
+    assume(s,'real');
+    assume(r,'positive');
+    g1 = int( f1(s,x),x,r/zeta21,Inf);
+    g2 = int( f2(s,x),x,0, Inf);
+    g3 = int( f3(s,x),x,r,Inf);
+    fg = g1+g2+g3;
+    for n=0:m1-1
+        derk1_I_e1 = @(r,s) 0;
+        for k=0:n
+            for j=0:k
+                a1_str = char( diff( (fg)^(k-j), 's', n)); % To convert sym expr to function handle
+                a1_str = strrep(a1_str, 'int(', 'integral(@(x)');
+                a1_str = strrep(a1_str, 'x,','');
+                a1_str = strrep(a1_str, '*','.*');
+                a1_str = strrep(a1_str, '/','./');
+                a1_str = strrep(a1_str, '^','.^');
+                a1_mf = eval(['@(r,s) ' a1_str]); % Converting Sym expr to Matlab Function handle
+                derk1_I_e1 = @(r,s) derk1_I_e1(r,s) + (-1)^j/factorial(k)*nchoosek(k,j)*a1_mf(r,s).*(fg_mf(r,s)).^j;
+            end
         end
+        dern_I_e1 = @(s,r) lapI_g_c(s,r).*derk1_I_e1(r,s);
+        pc_e11 = @(b) (integral(@(r) (-m1*b*r.^(alpha)/(p1*mlg_1)).^n/factorial(n).*dern_I_e1(m1*b*r.^(alpha)/(p1*mlg_1),r).*pdfr_g_c(r), 0, Inf, 'ArrayValued', true));
+        pc_e1 = @(b) pc_e1(b) +  pc_e11(b);
     end
-    
-    dern_I_e1 = @(s,r) lapI_g_c(s,r).*derk1_I_e1(r,s);
-    pc_e11 = @(b) (integral(@(r) (-m1*b*r.^(alpha)/(p1*mlg_1)).^n/factorial(n).*dern_I_e1(m1*b*r.^(alpha)/(p1*mlg_1),r).*pdfr_g_c(r), 0, Inf, 'ArrayValued', true));
-    pc_e1 = @(b) pc_e1(b) +  pc_e11(b);
+    assume(s,'clear');
+    assume(r,'clear');
+    assume(x,'clear');
 end
+
 clear fg fg_mf a1_mf
 
 pc_e2 = @(b) 0;
 f1 = @(s,x) -2*sh_lambda_2*( 1 - (1+ s*(p2)*mlg_2*x.^(-alpha)/m20).^(-m20));
 f2 = @(s,x) -2*pi*sh_lambda_a*(1 - (1+s*(p2)*slg_2*x.^(-alpha)/m21).^(-m21)).*x;
 f3 = @(s,x) -2*pi*qc*sh_lambda_1*(1 - (1+s*(p1*mlg_1)*x.^(-alpha)/m1).^(-m1)).*x -2*pi*(1-qc)*sh_lambda_1*(1 - (1+s*(p1*slg_1)*x.^(-alpha)/m1).^(-m1)).*x;
-syms s r x;
-g1 = int( f1(s,x),x,r,Inf);
-g2 = int( f2(s,x),x,0, Inf);
-g3 = int( f3(s,x),x,zeta21*r,Inf);
-fg = g1+g2+g3;
-fg_str = char(fg);
-fg_str = strrep(fg_str, 'int(', 'integral(@(x)');
-fg_str = strrep(fg_str, 'x,','');
-fg_str = strrep(fg_str, '*', '.*');
-fg_str = strrep(fg_str, '/', './');
-fg_str = strrep(fg_str, '^', '.^');
-fg_mf = eval(['@(r,s) ' fg_str]);
-for n=0:m20-1
-    derk1_I_e2 = @(r,s) 0;
-    for k=0:n
-        for j=0:k
-            a1_str = char( diff( (fg)^(k-j), 's', n));
-            a1_str = strrep(a1_str, 'int(', 'integral(@(x)');
-            a1_str = strrep(a1_str, 'x,','');
-            a1_str = strrep(a1_str, '*','.*');
-            a1_str = strrep(a1_str, '/','./');
-            a1_str = strrep(a1_str, '^','.^');
-            a1_mf = eval(['@(r,s) ' a1_str]);
-            derk1_I_e2 = @(r,s) derk1_I_e2(r,s) + (-1)^j/factorial(k)*nchoosek(k,j)*a1_mf(r,s).*(fg_mf(r,s)).^j;
+fg_mf = @(r,s) integral(@(x) f1(s,x), r, Inf,'ArrayValued', true) + integral(@(x) f2(s,x),0, Inf,'ArrayValued', true) + integral(@(x) f3(s,x),zeta21*r,Inf,'ArrayValued', true);
+
+if m20==1
+    pc_e2 = @(b) (integral(@(r) lapI_g_u(m20*b*r.^(alpha)/(p2*mlg_2),r).*pdfr_g_u(r), 0, Inf, 'ArrayValued', true));
+else
+    syms s r x;
+    assume(s,'real');
+    assume(r,'positive');
+    g1 = int( f1(s,x),x,r,Inf);
+    g2 = int( f2(s,x),x,0, Inf);
+    g3 = int( f3(s,x),x,zeta21*r,Inf);
+    fg = g1+g2+g3;
+    for n=0:m20-1
+        derk1_I_e2 = @(r,s) 0;
+        for k=0:n
+            for j=0:k
+                a1_str = char( diff( (fg)^(k-j), 's', n));
+                a1_str = strrep(a1_str, 'int(', 'integral(@(x)');
+                a1_str = strrep(a1_str, 'x,','');
+                a1_str = strrep(a1_str, '*','.*');
+                a1_str = strrep(a1_str, '/','./');
+                a1_str = strrep(a1_str, '^','.^');
+                a1_mf = eval(['@(r,s) ' a1_str]);
+                derk1_I_e2 = @(r,s) derk1_I_e2(r,s) + (-1)^j/factorial(k)*nchoosek(k,j)*a1_mf(r,s).*(fg_mf(r,s)).^j;
+            end
         end
+        dern_I_e2 = @(s,r) lapI_g_u(s,r).*derk1_I_e2(r,s);
+        pc_e22 = @(b)  (integral(@(r) (-m20*b*r.^(alpha)/(p2*mlg_2)).^n/factorial(n).*dern_I_e2(m20*b*r.^(alpha)/(p2*mlg_2),r).*pdfr_g_u(r), 0, Inf, 'ArrayValued', true));
+        pc_e2 = @(b) pc_e2(b) + pc_e22(b);
     end
-    
-    dern_I_e2 = @(s,r) lapI_g_u(s,r).*derk1_I_e2(r,s);
-    pc_e22 = @(b)  (integral(@(r) (-m20*b*r.^(alpha)/(p2*mlg_2)).^n/factorial(n).*dern_I_e2(m20*b*r.^(alpha)/(p2*mlg_2),r).*pdfr_g_u(r), 0, Inf, 'ArrayValued', true));
-    pc_e2 = @(b) pc_e2(b) + pc_e22(b);
 end
 
-sir_threshold_db = 0;
-bval = 10^(.1*sir_threshold_db);    
+
+bval = sir_threshold;
 cov_prob_u = pc_e2(bval);
 cov_prob_c = pc_e1(bval);
 thy_cov_prob = cov_prob_c*pec + cov_prob_u*peu;
-
-
-
-
 
 
 
